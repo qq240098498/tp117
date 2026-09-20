@@ -261,6 +261,103 @@ tr.source-row td {
   background: var(--accent-soft);
 }
 
+/* 对照表的按日分隔行：前一天偏冷、后一天偏暖，跟来源同一天保持中性 */
+tr.day-sep td {
+  padding: 6px 10px;
+  background: #f3f6fa;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 12.5px;
+  white-space: normal;
+}
+
+tr.day-sep.day-prev td {
+  background: #eef3f8;
+  border-top: 2px solid #b9c9d8;
+}
+
+tr.day-sep.day-next td {
+  background: var(--warn-bg);
+  border-top: 2px solid var(--warn-line);
+}
+
+tr.day-sep.day-same td {
+  border-top: 2px solid var(--accent);
+}
+
+tr.convert-row.day-prev td {
+  background: #f8fafc;
+}
+
+tr.convert-row.day-next td {
+  background: #fffdf8;
+}
+
+tr.source-row td {
+  background: var(--accent-soft) !important;
+}
+
+/* 当地零点的行单独标出来：左侧加一道醒目的色边 */
+tr.row-midnight td {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+tr.row-midnight td.local-time {
+  font-weight: 600;
+}
+
+tr.row-tied td {
+  border-bottom-color: var(--accent);
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 16px;
+  vertical-align: middle;
+}
+
+.badge.midnight {
+  background: var(--accent);
+  color: #fff;
+}
+
+.badge.tied {
+  background: #ede7fb;
+  color: #6a3fb5;
+}
+
+.badge.source {
+  background: var(--accent);
+  color: #fff;
+}
+
+.offset-note {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #eef0f3;
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+td.dst-cell {
+  white-space: normal;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+td.dst-cell.dst-on {
+  color: #8a5a00;
+  font-weight: 600;
+}
+
 .tag {
   display: inline-block;
   padding: 1px 6px;

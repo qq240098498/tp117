@@ -263,20 +263,70 @@ async function runConvert() {
   }
 }
 
+function daySepClass(dayOffset) {
+  if (dayOffset < 0) return 'day-prev';
+  if (dayOffset > 0) return 'day-next';
+  return 'day-same';
+}
+
 function renderConvert(result) {
-  el('convert-meta').textContent = `来源 ${result.input.zoneName}（${result.input.zoneDisplayName}，${result.input.offsetText}）的 ${result.input.date} ${result.input.time}，换算时刻 ${formatTime(result.convertedAt)}；参与换算的档案 ${result.zonesInScope} 条，与来源不同天的有 ${result.crossDayCount} 条，最大时差 ${Math.floor(result.maxDiffMinutes / 60)} 小时 ${result.maxDiffMinutes % 60} 分`;
+  const summary = result.summary || {
+    zonesInScope: result.zonesInScope,
+    resultCount: (result.results || []).length,
+    dayGroupCount: 0,
+    prevDayCount: 0,
+    sameDayCount: 0,
+    nextDayCount: 0,
+    crossDayCount: result.crossDayCount,
+    midnightCount: 0,
+    tiedRowCount: 0,
+    dstActiveCount: 0,
+    maxDiffMinutes: result.maxDiffMinutes,
+  };
+  const sourceDst = result.input.dstActive
+    ? `此刻来源地夏令时生效，按 ${result.input.offsetText} 折算`
+    : `此刻来源地按 ${result.input.offsetText} 折算`;
+  el('convert-meta').textContent = `来源 ${result.input.zoneName}（${result.input.zoneDisplayName}）的 ${result.input.date} ${result.input.time}，${sourceDst}；UTC ${result.standard.date} ${result.standard.time}，换算时刻 ${formatTime(result.convertedAt)}。参与换算 ${summary.zonesInScope} 条，对照表实收 ${summary.resultCount} 条；落在前一天 ${summary.prevDayCount} 条、同一天 ${summary.sameDayCount} 条、后一天 ${summary.nextDayCount} 条，共 ${summary.dayGroupCount} 个当地日期；当地零点 ${summary.midnightCount} 条，夏令时生效中 ${summary.dstActiveCount} 条，时刻完全并列 ${summary.tiedRowCount} 条，最大时差 ${Math.floor(summary.maxDiffMinutes / 60)} 小时 ${summary.maxDiffMinutes % 60} 分`;
+
+  // 按结果里相邻条目的当地日期切分组，与后端 dayGroups 一一对应；每条结果都保留，并列条目不合并
   const body = el('convert-body');
-  body.innerHTML = result.results.map((item) => `<tr class="${item.isSource ? 'source-row' : ''}">
-      <td class="mono">${escapeHtml(item.name)}</td>
+  const rows = [];
+  let lastDate = '';
+  result.results.forEach((item) => {
+    if (item.localDate !== lastDate) {
+      const group = (result.dayGroups || []).find((g) => g.date === item.localDate) || null;
+      const parts = [
+        `<strong>${escapeHtml(item.localDate)}</strong>`,
+        escapeHtml(item.weekday),
+        escapeHtml(item.dayOffsetText),
+      ];
+      if (group) {
+        const notes = [`本组 ${group.count} 个地区`];
+        if (group.midnightCount) notes.push(`当地零点 ${group.midnightCount} 个`);
+        if (group.dstActiveCount) notes.push(`夏令时生效中 ${group.dstActiveCount} 个`);
+        parts.push(notes.join('，'));
+      }
+      rows.push(`<tr class="day-sep ${daySepClass(item.dayOffset)}"><td colspan="9">${parts.join('　·　')}</td></tr>`);
+      lastDate = item.localDate;
+    }
+    const midnight = item.isMidnight ? '<span class="badge midnight">当地零点</span>' : '';
+    const tie = item.tied ? '<span class="badge tied">并列</span>' : '';
+    const offsetCell = item.dstActive
+      ? `${escapeHtml(item.offsetText)}<span class="offset-note">夏令时档</span>`
+      : `${escapeHtml(item.offsetText)}${item.usesDst ? '<span class="offset-note">标准档</span>' : ''}`;
+    rows.push(`<tr class="convert-row ${daySepClass(item.dayOffset)} ${item.isMidnight ? 'row-midnight' : ''} ${item.tied ? 'row-tied' : ''} ${item.isSource ? 'source-row' : ''}">
+      <td class="mono">${escapeHtml(item.name)}${item.isSource ? '<span class="badge source">来源</span>' : ''}</td>
       <td>${escapeHtml(item.displayName)}</td>
       <td class="mono">${escapeHtml(item.localDate)}</td>
-      <td class="mono">${escapeHtml(item.localTime)}</td>
       <td>${escapeHtml(item.weekday)}</td>
+      <td class="mono local-time">${escapeHtml(item.localTime)} ${midnight}${tie}</td>
       <td><span class="tag ${item.dayOffset === 0 ? 'off' : 'warn'}">${escapeHtml(item.dayOffsetText)}</span></td>
-      <td class="mono">${escapeHtml(item.offsetText)}</td>
+      <td class="mono">${offsetCell}</td>
       <td>${escapeHtml(item.diffText)}</td>
-      <td>${item.usesDst ? '有规则' : '—'}</td>
-    </tr>`).join('');
+      <td class="dst-cell ${item.dstActive ? 'dst-on' : ''}">${escapeHtml(item.dstStateText || (item.usesDst ? '有规则' : '—'))}</td>
+    </tr>`);
+  });
+  body.innerHTML = rows.join('');
   el('convert-empty').classList.toggle('hidden', result.results.length > 0);
 }
 
