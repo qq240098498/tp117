@@ -1,10 +1,10 @@
 const { load, WEEKDAY_NAMES } = require('./store');
 const { ApiError, pickText } = require('./errors');
 const { offsetText } = require('./zones');
+const { dstStatus, DAY_MS } = require('./dst');
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
-const DAY_MS = 86400000;
 
 const pad = (num) => String(num).padStart(2, '0');
 
@@ -55,7 +55,27 @@ function dayOffsetText(dayOffset) {
   return `前 ${Math.abs(dayOffset)} 天`;
 }
 
-// 换算：先把输入时刻按来源时区的偏移折算成基准时刻，再逐个时区加上各自的偏移
+// 夏令时那一档在结果里怎么写：生效中点明按哪一档偏移算，规则在但此刻不在夏令时里也要说清
+function dstText(status, zone) {
+  if (!zone.usesDst) return '不实行夏令时';
+  if (!status.ruleActive) return '夏令时规则不在生效年份内';
+  if (status.active) return `夏令时中，按夏令时档 ${offsetText(zone.dstOffsetMinutes)} 计算`;
+  return `夏令时未生效，按标准档 ${offsetText(zone.offsetMinutes)} 计算`;
+}
+
+function localParts(localMs) {
+  const local = new Date(localMs);
+  return {
+    local,
+    localDay: Math.floor(localMs / DAY_MS),
+    localDate: `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}`,
+    localTime: `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`,
+    weekday: WEEKDAY_NAMES[local.getUTCDay()],
+  };
+}
+
+// 换算：输入的是来源地挂钟上的时刻，先按来源地当时的生效偏移（夏令时档或标准档）折成基准时刻，
+// 再逐个时区按各自当时的生效偏移加回去
 function convert(options) {
   const input = options && typeof options === 'object' ? options : {};
   const date = validateDate(input.date);
@@ -67,39 +87,63 @@ function convert(options) {
   const source = data.zones.find((item) => item.id === zoneId);
   if (!source) throw new ApiError(404, 'ZONE_NOT_FOUND', '选中的时区没有登记过', 'zoneId');
 
-  const baseMs = Date.UTC(date.year, date.month - 1, date.day, time.hour, time.minute);
-  const utcMs = baseMs - source.offsetMinutes * 60000;
-  const baseDay = Math.floor(baseMs / DAY_MS);
+  const sourceWallMs = Date.UTC(date.year, date.month - 1, date.day, time.hour, time.minute);
+  // 输入时刻即来源地当地时刻，来源地若正处在夏令时，基准时刻要按夏令时档反推
+  const sourceStatus = dstStatus(source, sourceWallMs - source.offsetMinutes * 60000);
+  const sourceAppliedOffset = sourceStatus.appliedOffsetMinutes;
+  const utcMs = sourceWallMs - sourceAppliedOffset * 60000;
+  const sourceLocalDay = Math.floor(sourceWallMs / DAY_MS);
   const utcDate = new Date(utcMs);
 
-  const results = data.zones.map((zone) => {
-    const localMs = utcMs + zone.offsetMinutes * 60000;
-    const local = new Date(localMs);
-    const dayOffset = Math.floor(localMs / DAY_MS) - baseDay;
-    const diffMinutes = zone.offsetMinutes - source.offsetMinutes;
+  const results = data.zones.map((zone, index) => {
+    const status = dstStatus(zone, utcMs);
+    const appliedOffset = status.appliedOffsetMinutes;
+    const localMs = utcMs + appliedOffset * 60000;
+    const parts = localParts(localMs);
+    const dayOffset = parts.localDay - sourceLocalDay;
+    const diffMinutes = appliedOffset - sourceAppliedOffset;
     return {
+      index,
       zoneId: zone.id,
       name: zone.name,
       displayName: zone.displayName,
-      offsetMinutes: zone.offsetMinutes,
-      offsetText: offsetText(zone.offsetMinutes),
-      localDate: `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}`,
-      localTime: `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`,
-      weekday: WEEKDAY_NAMES[local.getUTCDay()],
+      standardOffsetMinutes: zone.offsetMinutes,
+      standardOffsetText: offsetText(zone.offsetMinutes),
+      offsetMinutes: appliedOffset,
+      offsetText: offsetText(appliedOffset),
+      usesDst: zone.usesDst,
+      dstRuleActive: status.ruleActive,
+      dstActive: status.active,
+      dstOffsetMinutes: zone.usesDst ? zone.dstOffsetMinutes : null,
+      dstOffsetText: zone.usesDst && zone.dstOffsetMinutes !== null ? offsetText(zone.dstOffsetMinutes) : '',
+      dstText: dstText(status, zone),
+      localDate: parts.localDate,
+      localTime: parts.localTime,
+      weekday: parts.weekday,
+      // 当地零点：换算时刻正好落在当地日历日的边界上，单独标出来
+      midnightBoundary: localMs % DAY_MS === 0,
       dayOffset,
       dayOffsetText: dayOffsetText(dayOffset),
       diffMinutes,
       diffText: diffText(diffMinutes),
-      usesDst: zone.usesDst,
       isSource: zone.id === source.id,
     };
   });
 
+  // 对照表按当地日期先后排；同一天里按当地时刻从早到晚排。
+  // 日期与时刻完全相同的两条互不覆盖，保持登记顺序并排在一起
   results.sort((a, b) => {
-    if (a.offsetMinutes !== b.offsetMinutes) return a.offsetMinutes - b.offsetMinutes;
-    return a.name < b.name ? -1 : 1;
+    if (a.localDay !== b.localDay) return a.localDay - b.localDay;
+    // 同一天里比较各自的当地毫秒，等价于按当地时刻从早到晚
+    const aMs = utcMs + a.offsetMinutes * 60000;
+    const bMs = utcMs + b.offsetMinutes * 60000;
+    if (aMs !== bMs) return aMs - bMs;
+    // 日期与时刻完全相同也不合并，只按登记顺序稳定排在一起
+    return a.index - b.index;
   });
+  results.forEach((item) => { delete item.index; });
 
+  const dstActiveCount = results.filter((item) => item.dstActive).length;
   return {
     input: {
       date: date.text,
@@ -107,18 +151,24 @@ function convert(options) {
       zoneId: source.id,
       zoneName: source.name,
       zoneDisplayName: source.displayName,
-      offsetText: offsetText(source.offsetMinutes),
+      offsetText: offsetText(sourceAppliedOffset),
+      standardOffsetText: offsetText(source.offsetMinutes),
       usesDst: source.usesDst,
+      dstActive: sourceStatus.active,
+      dstText: dstText(sourceStatus, source),
     },
     standard: {
       date: `${utcDate.getUTCFullYear()}-${pad(utcDate.getUTCMonth() + 1)}-${pad(utcDate.getUTCDate())}`,
       time: `${pad(utcDate.getUTCHours())}:${pad(utcDate.getUTCMinutes())}`,
     },
     zonesInScope: data.zones.length,
-    crossDayCount: results.filter((item) => item.dayOffset !== 0).length,
+    prevDayCount: results.filter((item) => item.dayOffset < 0).length,
+    sameDayCount: results.filter((item) => item.dayOffset === 0).length,
+    nextDayCount: results.filter((item) => item.dayOffset > 0).length,
+    midnightCount: results.filter((item) => item.midnightBoundary).length,
+    dstActiveCount,
     maxDiffMinutes: results.reduce((acc, item) => Math.max(acc, Math.abs(item.diffMinutes)), 0),
     results,
-    convertedAt: new Date().toISOString(),
   };
 }
 

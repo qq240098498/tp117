@@ -71,14 +71,6 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
-function formatTime(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const pad = (num) => String(num).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 const MONTH_LABEL = Object.fromEntries(MONTHS);
 const WEEK_LABEL = Object.fromEntries(WEEKS);
 const WEEKDAY_LABEL = Object.fromEntries(WEEKDAYS);
@@ -263,20 +255,60 @@ async function runConvert() {
   }
 }
 
+function dstTagLabel(item) {
+  if (!item.usesDst) return '不实行';
+  if (!item.dstRuleActive) return '规则已失效';
+  return item.dstActive ? '夏令时中' : '标准档';
+}
+
+function relativeDayLabel(dayOffset) {
+  if (dayOffset === 0) return '与来源同一天';
+  return dayOffset > 0 ? '比来源晚一天' : '比来源早一天';
+}
+
 function renderConvert(result) {
-  el('convert-meta').textContent = `来源 ${result.input.zoneName}（${result.input.zoneDisplayName}，${result.input.offsetText}）的 ${result.input.date} ${result.input.time}，换算时刻 ${formatTime(result.convertedAt)}；参与换算的档案 ${result.zonesInScope} 条，与来源不同天的有 ${result.crossDayCount} 条，最大时差 ${Math.floor(result.maxDiffMinutes / 60)} 小时 ${result.maxDiffMinutes % 60} 分`;
-  const body = el('convert-body');
-  body.innerHTML = result.results.map((item) => `<tr class="${item.isSource ? 'source-row' : ''}">
+  const maxHour = Math.floor(result.maxDiffMinutes / 60);
+  const maxMinute = result.maxDiffMinutes % 60;
+  el('convert-meta').textContent = `来源 ${result.input.zoneName}（${result.input.zoneDisplayName}，${result.input.offsetText}）当地挂钟 ${result.input.date} ${result.input.time}，对应基准时刻 ${result.standard.date} ${result.standard.time}；参与换算的档案 ${result.zonesInScope} 条，结果 ${result.results.length} 条一一对应：还在前一天 ${result.prevDayCount} 条、已进入后一天 ${result.nextDayCount} 条，当地零点 ${result.midnightCount} 条，夏令时中 ${result.dstActiveCount} 条，最大时差 ${maxHour} 小时 ${maxMinute} 分`;
+
+  const groupCounts = result.results.reduce((acc, item) => {
+    acc[item.localDate] = (acc[item.localDate] || 0) + 1;
+    return acc;
+  }, {});
+
+  const rows = [];
+  let lastDate = '';
+  result.results.forEach((item) => {
+    if (item.localDate !== lastDate) {
+      lastDate = item.localDate;
+      const sepClass = item.dayOffset < 0 ? 'day-sep-prev' : item.dayOffset > 0 ? 'day-sep-next' : 'day-sep-same';
+      rows.push(`<tr class="day-sep ${sepClass}"><td colspan="10">
+          <span class="day-sep-date mono">${escapeHtml(item.localDate)}</span>
+          <span>${escapeHtml(item.weekday)}</span>
+          <span class="day-sep-note">${relativeDayLabel(item.dayOffset)} · 共 ${groupCounts[item.localDate]} 个地区</span>
+        </td></tr>`);
+    }
+    const rowClass = [
+      item.isSource ? 'source-row' : '',
+      item.dayOffset < 0 ? 'day-prev' : '',
+      item.dayOffset > 0 ? 'day-next' : '',
+    ].filter(Boolean).join(' ');
+    rows.push(`<tr class="${rowClass}">
       <td class="mono">${escapeHtml(item.name)}</td>
       <td>${escapeHtml(item.displayName)}</td>
-      <td class="mono">${escapeHtml(item.localDate)}</td>
-      <td class="mono">${escapeHtml(item.localTime)}</td>
+      <td class="mono day-cell ${item.dayOffset < 0 ? 'day-text-prev' : item.dayOffset > 0 ? 'day-text-next' : ''}">${escapeHtml(item.localDate)}</td>
       <td>${escapeHtml(item.weekday)}</td>
+      <td class="mono">${escapeHtml(item.localTime)}${item.midnightBoundary ? ' <span class="tag midnight">当地零点</span>' : ''}</td>
       <td><span class="tag ${item.dayOffset === 0 ? 'off' : 'warn'}">${escapeHtml(item.dayOffsetText)}</span></td>
-      <td class="mono">${escapeHtml(item.offsetText)}</td>
+      <td>${item.midnightBoundary ? '<span class="tag midnight">零点边界</span>' : '<span class="dash">—</span>'}</td>
+      <td class="mono">${escapeHtml(item.offsetText)}${item.dstActive ? `<span class="cell-sub">标准档 ${escapeHtml(item.standardOffsetText)}</span>` : ''}</td>
+      <td><span class="tag ${item.dstActive ? 'on' : 'off'}">${dstTagLabel(item)}</span><span class="cell-sub">${escapeHtml(item.dstText)}</span></td>
       <td>${escapeHtml(item.diffText)}</td>
-      <td>${item.usesDst ? '有规则' : '—'}</td>
-    </tr>`).join('');
+    </tr>`);
+  });
+
+  const body = el('convert-body');
+  body.innerHTML = rows.join('');
   el('convert-empty').classList.toggle('hidden', result.results.length > 0);
 }
 

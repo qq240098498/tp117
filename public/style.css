@@ -261,6 +261,76 @@ tr.source-row td {
   background: var(--accent-soft);
 }
 
+td.day-cell {
+  white-space: nowrap;
+}
+
+td .day-text-prev,
+.day-sep-prev .day-sep-note {
+  color: var(--danger);
+}
+
+td .day-text-next,
+.day-sep-next .day-sep-note {
+  color: var(--ok);
+}
+
+/* 对照表按当地日期分组：换一天就插一条分组行，颜色直接区分前一天与后一天 */
+tr.day-sep td {
+  padding: 6px 10px;
+  background: #f3f6fa;
+  border-top: 2px solid var(--line);
+  font-size: 12.5px;
+}
+
+tr.day-sep .day-sep-date {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+tr.day-sep .day-sep-note {
+  margin-left: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+tr.day-sep-prev td {
+  background: #fdf3f3;
+}
+
+tr.day-sep-next td {
+  background: #f0f8f4;
+}
+
+tr.day-prev td {
+  background: #fdf8f8;
+}
+
+tr.day-next td {
+  background: #f5fbf8;
+}
+
+tr.day-prev.source-row td,
+tr.day-next.source-row td {
+  background: var(--accent-soft);
+}
+
+.cell-sub {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.tag.midnight {
+  background: #e9f0ff;
+  color: #1a4fa0;
+}
+
+.dash {
+  color: #b4bdc7;
+}
+
 .tag {
   display: inline-block;
   padding: 1px 6px;
